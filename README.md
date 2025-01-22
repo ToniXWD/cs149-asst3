@@ -66,6 +66,29 @@ Note that in your measurements that include the time to transfer to and from the
 **Question 1.** What performance do you observe compared to the sequential CPU-based implementation of
 SAXPY (recall your results from saxpy on Program 5 from Assignment 1)?
 
+The output is as follows:
+```bash
+✗ ./cudaSaxpy
+---------------------------------------------------------
+Found 1 CUDA devices
+Device 0: NVIDIA GeForce RTX 4070 Ti SUPER
+   SMs:        66
+   Global mem: 16376 MB
+   CUDA Cap:   8.9
+---------------------------------------------------------
+Running 3 timing tests:
+Effective BW by CUDA saxpy: 102.225 ms          [10.933 GB/s]
+CudaMemcpy to device BW by CUDA saxpy: 102.225 ms               [10.328 GB/s]
+CudaMemcpy to host BW by CUDA saxpy: 102.225 ms         [13.953 GB/s]
+Effective BW by CUDA saxpy: 98.403 ms           [11.357 GB/s]
+CudaMemcpy to device BW by CUDA saxpy: 98.403 ms                [10.459 GB/s]
+CudaMemcpy to host BW by CUDA saxpy: 98.403 ms          [14.845 GB/s]
+Effective BW by CUDA saxpy: 95.089 ms           [11.753 GB/s]
+CudaMemcpy to device BW by CUDA saxpy: 95.089 ms                [10.920 GB/s]
+CudaMemcpy to host BW by CUDA saxpy: 95.089 ms          [15.024 GB/s]
+```
+Compared with the CPU version, performance declines because saxpy is an IO intensive task.
+
 **Question 2.** Compare and explain the difference between the results
 provided by two sets of timers (timing only the kernel execution vs. timing the entire process of moving data to the GPU and back in addition to the kernel execution). Are the bandwidth values observed _roughly_ consistent with the reported bandwidths available to the different components of the machine? (You should use the web to track down the memory bandwidth of an NVIDIA T4 GPU. Hint: <https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/tesla-t4/t4-tensor-core-datasheet-951643.pdf>. The expected bandwidth of memory bus of AWS is 5.3 GB/s, which does not match that of a 16-lane [PCIe 3.0](https://en.wikipedia.org/wiki/PCI_Express). Several factors prevent peak bandwidth, including CPU motherboard chipset performance and whether or not the host CPU memory used as the source of the transfer is “pinned” — the latter allows the GPU to directly access memory without going through virtual memory address translation. If you are interested, you can find more info here: <https://kth.instructure.com/courses/12406/pages/optimizing-host-device-data-communication-i-pinned-host-memory>)
 
