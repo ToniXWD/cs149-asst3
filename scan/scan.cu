@@ -27,6 +27,44 @@ static inline int nextPow2(int n) {
     return n;
 }
 
+__global__ void exclusive_scan_upsweep(int* result, int two_d, int two_dplus1, int N) {
+    // 计算这个线程应该处理的位置
+    // 每个线程直接跳到需要计算的位置，而不是逐个检查整除
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+    
+    // 计算第一个需要处理的位置
+    idx = idx * two_dplus1;
+    
+    // 使用 stride 来处理多个位置
+    while (idx < N) {
+        result[idx + two_dplus1 - 1] += result[idx + two_d - 1];
+        idx += stride * two_dplus1;
+    }
+}
+
+__global__ void exclusive_scan_downsweep(int* result, int two_d, int two_dplus1, int N) {
+    // 同样的优化方式
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+    
+    // 计算第一个需要处理的位置
+    idx = idx * two_dplus1;
+    
+    // 使用 stride 来处理多个位置
+    while (idx < N) {
+        int t = result[idx + two_d - 1];
+        result[idx + two_d - 1] = result[idx + two_dplus1 - 1];
+        result[idx + two_dplus1 - 1] += t;
+        idx += stride * two_dplus1;
+    }
+}
+
+__global__ 
+void last0(int * result, int N) {
+    result[N - 1] = 0;
+}
+
 // exclusive_scan --
 //
 // Implementation of an exclusive scan on global memory array `input`,
@@ -44,17 +82,26 @@ static inline int nextPow2(int n) {
 // places it in result
 void exclusive_scan(int* input, int N, int* result)
 {
+    const int blockSize = 256;  // 增加到256
+    // 根据问题规模调整网格大小，但不要太大
+    int gridSize = std::min((N + blockSize - 1) / blockSize, 1024);
 
-    // CS149 TODO:
-    //
-    // Implement your exclusive scan implementation here.  Keep in
-    // mind that although the arguments to this function are device
-    // allocated arrays, this is a function that is running in a thread
-    // on the CPU.  Your implementation will need to make multiple calls
-    // to CUDA kernel functions (that you must write) to implement the
-    // scan.
+    // upsweep phase
+    for (int two_d = 1; two_d <= N/2; two_d*=2) {
+        int two_dplus1 = 2*two_d;
+        exclusive_scan_upsweep<<<gridSize,blockSize>>>(result, two_d, two_dplus1, N);
+        cudaDeviceSynchronize();
+    }
 
+    last0<<<1,1>>>(result, N);
+    cudaDeviceSynchronize();
 
+    // downsweep phase
+    for (int two_d = N/2; two_d >= 1; two_d /= 2) {
+        int two_dplus1 = 2*two_d;
+        exclusive_scan_downsweep<<<gridSize,blockSize>>>(result, two_d, two_dplus1, N);
+        cudaDeviceSynchronize();
+    }
 }
 
 
