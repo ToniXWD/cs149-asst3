@@ -27,44 +27,27 @@ static inline int nextPow2(int n) {
     return n;
 }
 
-__global__ void exclusive_scan_upsweep(int* result, int two_d, int two_dplus1, int N) {
-    // 计算这个线程应该处理的位置
-    // 每个线程直接跳到需要计算的位置，而不是逐个检查整除
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = gridDim.x * blockDim.x;
-    
-    // 计算第一个需要处理的位置
-    idx = idx * two_dplus1;
-    
-    // 使用 stride 来处理多个位置
-    while (idx < N) {
-        result[idx + two_dplus1 - 1] += result[idx + two_d - 1];
-        idx += stride * two_dplus1;
-    }
+__global__ void up_sweep(int *result, int two_d) {
+    int group_idx = threadIdx.x + blockDim.x * blockIdx.x;
+    int group_diff = two_d * 2;
+    int group_mid = group_diff * group_idx + two_d - 1;
+    int group_last = group_diff * (group_idx + 1) - 1;
+    result[group_last] += result[group_mid];
 }
 
-__global__ void exclusive_scan_downsweep(int* result, int two_d, int two_dplus1, int N) {
-    // 同样的优化方式
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int stride = gridDim.x * blockDim.x;
-    
-    // 计算第一个需要处理的位置
-    idx = idx * two_dplus1;
-    
-    // 使用 stride 来处理多个位置
-    while (idx < N) {
-        int t = result[idx + two_d - 1];
-        result[idx + two_d - 1] = result[idx + two_dplus1 - 1];
-        result[idx + two_dplus1 - 1] += t;
-        idx += stride * two_dplus1;
-    }
+__global__ void down_sweep(int * result, int two_d) {
+    int group_idx = threadIdx.x + blockDim.x * blockIdx.x;
+    int group_diff = two_d * 2;
+    int group_mid = group_diff * group_idx + two_d - 1;
+    int group_last = group_diff * (group_idx + 1) - 1;
+    int t = result[group_mid];
+    result[group_mid] = result[group_last];
+    result[group_last] += t;
 }
 
-__global__ 
-void last0(int * result, int N) {
+__global__ void zero_tail(int * result, int N) {
     result[N - 1] = 0;
 }
-
 // exclusive_scan --
 //
 // Implementation of an exclusive scan on global memory array `input`,
@@ -73,7 +56,7 @@ void last0(int * result, int N) {
 // N is the logical size of the input and output arrays, however
 // students can assume that both the start and result arrays we
 // allocated with next power-of-two sizes as described by the comments
-// in cudaScan().  This is helpful, since your parallel scan
+// in cudaScan().  This is helpful, since your parallel segmented scan
 // will likely write to memory locations beyond N, but of course not
 // greater than N rounded up to the next power of 2.
 //
@@ -82,25 +65,39 @@ void last0(int * result, int N) {
 // places it in result
 void exclusive_scan(int* input, int N, int* result)
 {
-    const int blockSize = 256;  // 增加到256
-    // 根据问题规模调整网格大小，但不要太大
-    int gridSize = std::min((N + blockSize - 1) / blockSize, 1024);
 
-    // upsweep phase
-    for (int two_d = 1; two_d <= N/2; two_d*=2) {
-        int two_dplus1 = 2*two_d;
-        exclusive_scan_upsweep<<<gridSize,blockSize>>>(result, two_d, two_dplus1, N);
-        cudaDeviceSynchronize();
+    // CS149 TODO:
+    //
+    // Implement your exclusive scan implementation here.  Keep input
+    // mind that although the arguments to this function are device
+    // allocated arrays, this is a function that is running in a thread
+    // on the CPU.  Your implementation will need to make multiple calls
+    // to CUDA kernel functions (that you must write) to implement the
+    // scan.
+    const int blockSize = 512;
+
+    // up sweep
+    int two_d = 1; // 计算的2个位置的索引差, 指数增长
+    int group_num = N / 2; // 计算的组数, 实际上也就是 thread
+    while (group_num > 0) {
+        int gridSize = (group_num > blockSize) ? (group_num + blockSize - 1) / blockSize : 1;
+        int realBlockSize = (group_num > blockSize) ? blockSize : group_num;
+        up_sweep<<<gridSize, realBlockSize>>>(result, two_d);
+        two_d *= 2;
+        group_num /= 2;
     }
 
-    last0<<<1,1>>>(result, N);
-    cudaDeviceSynchronize();
+    // make the last element 0
+    zero_tail<<<1, 1>>>(result, N);
 
-    // downsweep phase
-    for (int two_d = N/2; two_d >= 1; two_d /= 2) {
-        int two_dplus1 = 2*two_d;
-        exclusive_scan_downsweep<<<gridSize,blockSize>>>(result, two_d, two_dplus1, N);
-        cudaDeviceSynchronize();
+    // down sweep
+    group_num = 1;
+    while (group_num < N) {
+        two_d /= 2;
+        int gridSize = (group_num <= blockSize) ? 1 : group_num / blockSize;
+        int realBlockSize = (group_num <= blockSize) ? group_num : blockSize;
+        down_sweep<<<gridSize, realBlockSize>>>(result, two_d);
+        group_num *= 2;
     }
 }
 
@@ -137,12 +134,12 @@ double cudaScan(int* inarray, int* end, int* resultarray)
     // students are free to implement an in-place scan on the result
     // vector if desired.  If you do this, you will need to keep this
     // in mind when calling exclusive_scan from find_repeats.
-    cudaMemcpy(device_input, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(device_input, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice);
     cudaMemcpy(device_result, inarray, (end - inarray) * sizeof(int), cudaMemcpyHostToDevice);
 
     double startTime = CycleTimer::currentSeconds();
 
-    exclusive_scan(device_input, N, device_result);
+    exclusive_scan(device_input, rounded_length, device_result);
 
     // Wait for completion
     cudaDeviceSynchronize();

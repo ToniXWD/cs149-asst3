@@ -173,6 +173,14 @@ int main(int argc, char** argv) {
                         "Error: Device exclusive_scan outputs incorrect result."
                         " A[%d] = %d, expecting %d.\n",
                         i, resultarray[i], checkarray[i]);
+                        // 打印周围的数组元素
+                        int start = std::max(0, i-3);
+                        int end = std::min(N-1, i+3);
+                        fprintf(stderr, "Surrounding elements:\n");
+                        fprintf(stderr, "Index\tResult\tExpected\n");
+                        for (int j = start; j <= end; j++) {
+                            fprintf(stderr, "%d\t%d\t%d\n", j, resultarray[j], checkarray[j]);
+                        }
                 exit(1);
             }
         }
